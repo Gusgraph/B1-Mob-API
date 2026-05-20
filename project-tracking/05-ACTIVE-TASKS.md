@@ -1,0 +1,178 @@
+# Active tasks
+
+## Done in mobile API foundation window - 2026-05-20
+- added `/api/mobile/v1` route structure for Bismel1 mobile v1 customer access.
+- added mobile bearer-token auth without exposing web session cookies.
+- added JSON response envelope handling for mobile success/errors.
+- added sanitized customer payloads for dashboard, products, accounts, broker accounts, automation symbols, positions, orders, activity, performance, billing, support, and affiliate sections.
+- added guarded write foundations for symbol add/remove, automation toggle, broker connect/disconnect, manual close request, and support replies.
+- added mobile audit logs and mobile support tickets.
+- added focused feature tests for unauthenticated access, unverified users, trial locks, paid reads, symbol add/duplicate/remove warnings, automation guard requirements, broker secret redaction, manual close confirmation, cross-user scoping, affiliate approval, and admin route absence.
+- preserved Python runtime, broker execution, strategy logic, admin APIs, broker secrets, runtime tokens, and Cloud Run access boundaries.
+
+## Current mobile follow-up
+- wire mobile manual-close confirmation to the existing guarded web/manual close service if owner approves mobile order submission.
+- decide whether to install Laravel Sanctum later or keep the current lightweight hashed mobile token table.
+- add Expo/React Native client once the API contract is reviewed.
+
+## Done in current build window
+- harden the trader app against future regression by documenting runtime/account/source-of-truth invariants in both repos
+- audit current fixes for hidden user/account/slot-specific assumptions instead of only validating the original test accounts
+- fix the remaining generic Execution symbol-removal persistence gap so removed symbols no longer leave stale assignment payloads behind
+- add regression coverage proving Prime and Execution symbol removal persists empty state cleanly
+- bring Execution onto the customer Automation page as a real symbol-first product flow
+- add six more Execution strategies so Execution now supports 11 strategies total
+- add real Execution protections and global guardrails with runtime enforcement
+- fix Execution scheduled Cloud Run routing, discovery, and live slot processing
+- write Execution symbol-level runtime health state so the UI can show real checked/bar/result lines
+- unify Prime runtime storage toward canonical slot-scoped runtime docs with on-read promotion from legacy account-scoped docs
+- restore shared chart preview candles and overlay for Prime and Execution
+- increase shared chart preview lookback to `227` bars for `1H / 4H / 1D`
+- make shared chart popup mobile-first with chart-first layout and collapsible details
+- add ETF support to Execution symbol search/add flow through the existing US-equity execution path
+- clean Execution page wording into production-grade customer language and remove customer-facing `Slot` wording from that page
+- make Prime and Execution automation symbol lists responsive with dedicated mobile card layouts
+- clean the customer dashboard/account selector wording and remove stale placeholder cards
+
+## Done
+- Move the Automation symbol picker off the tiny preset-only source and onto a real internal instrument master dataset
+- Add admin-triggered instrument master sync/bootstrap actions on `Admin > System`
+- Validate live Alpaca-backed instrument master sync and populate the internal symbol dataset with real stock coverage
+- Upgrade the Automation symbol picker into a validated production-safe stock selector:
+  - autocomplete
+  - ticker/company-name search
+  - duplicate rejection
+  - unsupported symbol rejection
+- Harden the real Prime Stocks symbol flow so customer-managed symbols are the runtime source, not UI-only storage
+- Block non-entitled accounts from activating the Prime Stocks symbol add/search flow
+- Persist the primary runtime symbol from the same saved account symbol list managed on Automation
+- Make scheduler fan-out dispatch per active saved symbol for each entitled account
+- Exclude `paused` / `standby` symbols from runtime dispatch and stop dispatching removed symbols
+- Add remove confirmation warning that positions stay open if a symbol is removed
+- Fix the backend market-data path so Automation symbol rows and chart modal use live provider-backed data through backend service calls
+- Upgrade the Automation symbol chart modal from line preview to candlestick preview with:
+  - OHLC payloads
+  - right price scale
+  - current price line
+  - OHLC legend strip
+  - `4H / 1D / 1M` ranges
+- Fix the main hourly Prime Stocks scheduler path so it fans out across entitled accounts with valid `uid/account_id/alpaca_account_id`
+- Keep Prime Stocks runtime fully account-scoped in Firestore and confirm scheduler-driven writes no longer overwrite across accounts
+- Rebuild the customer Automation page into a clean Prime Stocks automation control surface instead of a runtime/debug wall
+- Remove the old numbered account-slot button row and replace it with the cleaner shared account selector
+- Add direct Prime Stocks symbol management on the Automation page:
+  - add symbol
+  - remove symbol
+  - active/pause mode
+- Clean Automation customer wording so the page reads as a product workflow instead of internal runtime state
+- Add customer-facing AI/readiness presentation on the Automation page:
+  - `Looking for trade condition`
+  - `IN PROGRESS`
+  - `Ready for trigger`
+  - `Watching for setup`
+  - `Paused`
+- Finalize Prime Stocks exposure-rule enforcement in runtime:
+  - per symbol entry `3%`
+  - all-symbol new-position cap `20%`
+  - add-only cap `70%`
+- Surface the exposure-rule summary in the customer Automation page active-account section
+- Add a read-only Prime Stocks runtime monitoring surface inside the existing Automation page using current Firestore runtime docs
+- Extend the Laravel Firestore Prime Stocks runtime read bundle to include heartbeat/current
+- Surface runtime health, last run result, execution state, AI state, heartbeat, and persisted basket state on the Automation page
+- Add shared Gemini AI cache records for market-wide and symbol-level Prime Stocks safety/regime scoring
+- Add reusable Gemini scoring service plus non-hot-path scoring script in the Python runtime repo
+- Wire Prime Stocks runtime to consume cached `Ai_*` fields as built-in safety/regime filtering
+- Extend Prime Stocks runtime payloads to include AI cache state and explicit AI blocked reasons
+- Add focused Python coverage for AI normalization, cache read/write, stale AI blocking, and runtime AI payloads
+- Validate and wire manual Alpaca paper/live credentials into explicit customer account slots
+- Add session-backed shared account selector to broker-dependent customer pages
+- Add slot-aware broker validation / refresh flow and slot-aware automation enable state
+- Move linked-account entitlement logic to 2 default slots with add-on gating for Account 3+
+- Integrate real Prime Stocks runtime read data into the existing Automation page from Firestore-backed runtime state
+- Read the existing Prime Stocks Firestore/runtime paths from Laravel in read-only mode only
+- Replace current static/demo Prime Stocks runtime fields in Automation with real runtime values where records exist
+- Keep graceful Automation fallback messaging when Firestore runtime data is missing or unavailable
+- Desk-check the active-plan Prime Stocks Automation page in both dark and light mode
+- Clean the Automation page wording/state model so Prime Stocks reads as the active plan product for local testing instead of a demo product
+- Remove mixed Demo Access vs subscribed wording from the active Prime Stocks Automation surface
+- Present Prime Stocks as `Prime Stocks Bot Trader` with active plan access in a local full-access test state until Stripe subscription wiring is completed
+- Cloud Run service 'bismel1-prime-stocks' for Prime Stocks deployed and healthy.
+- Firestore runtime bootstrap script created and available in Python repo.
+- Firestore runtime documents successfully seeded into database 'bismel1-1'.
+- Scheduled endpoint now reaches runtime without missing-runtime-doc blocking.
+- Clean the existing Automation page and convert it from placeholder-driven UI into product/subscription-driven UI inside the existing Automation system
+- Remove or reduce placeholder-heavy Automation sections that do not map to real product or subscription access state
+- Center Automation on real access outcomes:
+  - no active product
+  - Demo Access product
+  - active subscribed product
+- Keep Prime Stocks inside Automation and render subscribed/live naming as `Prime Stocks Bot Trader`
+- Add explicit Serverless Bot, control / monitoring zone, and no stay-open requirement wording inside Automation
+- Undo the standalone Prime Stocks page approach and integrate Prime Stocks into the existing Automation page/module using demo/static data only
+- Remove the standalone Prime Stocks route/nav path and keep Prime Stocks presentation inside Automation
+- Frame Prime Stocks inside Automation as a `Demo Access product` now, ready for later subscribed/live naming as `Prime Stocks Bot Trader`
+- Inspect current customer pages/nav and add a Prime Stocks customer-side visual testing surface for production review using demo/static data only
+- Link the Prime Stocks testing surface into the customer account navigation
+- Make the customer-facing runtime boundary explicit: Cloud Run server-side runtime, control/monitoring page only, browser does not need to stay open
+- Inspect customer routes and live 500 causes for dashboard, onboarding, and reports
+- Confirm all three customer 500s come from the same missing Firestore credentials exception path
+- Add a controller-local Firestore fallback for the three broken customer pages
+- Remove the public `Home` left-nav group from the customer account shell
+- Add a focused regression test for missing Firestore credentials on the broken customer pages
+- Update tracking files for the customer account QA task
+- Add a customer-scoped premium shell and visual-system pass using the existing light/dark theme foundation
+- Unify customer cards, dashboard panels, nav states, forms, list rows, and plan catalog styling across the customer account
+- Keep dark mode as the premium target while leaving light mode clean and readable
+- Repair the authenticated shell theme toggle so it visibly switches customer pages again
+- Restore the intended top-right customer menu border/glow treatment without changing menu behavior
+- Run the final authenticated customer finishing pass across page-intro hierarchy, shell spacing, icon consistency, and nested surface weight
+- Aggressively neutralized all `.app-topbar` card-shaped styling for customer routes (padding, background, border, radius, shadow, and backdrop-filter), ensuring only the standalone 3-dots menu button remains visually unframed.
+- Removed the top-right topbar frame/container on customer pages, leaving only the standalone 3-dots menu button.
+- Removed the redundant top-left shell title block from authenticated customer pages, conditionally hiding it on customer routes.
+- Collapse repeated customer top-of-page framing by moving page summaries into the shared page-intro treatment where appropriate
+- Soften customer rows, module cards, and nav support bands without changing route structure or business logic
+- Removed technical config details from `/resources/views/customer/broker/authorize.blade.php`
+- Removed the entire warning card for "Alpaca connection is not ready yet" from `/resources/views/customer/broker/authorize.blade.php`
+- Made the "Continue to Alpaca" button always enabled in `/resources/views/customer/broker/authorize.blade.php`
+- Changed the page-shell summary title to 'Connect Alpaca Account' in `/resources/views/customer/broker/authorize.blade.php` (later removed)
+- Changed the icon next to "Authorize Bismel1" to a lock icon (`fa-solid fa-lock`) in `/resources/views/customer/broker/authorize.blade.php`
+- Redesigned the "Continue to Alpaca" button to be greenish using inline styles in `/resources/views/customer/broker/authorize.blade.php`
+- Centered the "Authorize Bismel1" title within its card using inline style in `/resources/views/customer/broker/authorize.blade.php`
+- Centered the `ui-card` itself using `max-width` and `margin: 0 auto` in `/resources/views/customer/broker/authorize.blade.php`
+- Centered the header content (icon and "Authorize Bismel1" title) using `text-align: center` on `customer-section__heading` in `/resources/views/customer/broker/authorize.blade.php`
+- Centered the action buttons using `text-align: center;` on `ui-form-actions__buttons` and applied `display: inline-block; margin: 0 0.5rem;` to the individual form and anchor elements in `/resources/views/customer/broker/authorize.blade.php`
+- Centered the container of the buttons (`div.ui-form-actions`) using `max-width: 600px; margin: 0 auto;` for desktop view in `/resources/views/customer/broker/authorize.blade.php`
+- Cleaned up messages in `/resources/views/customer/broker/callback.blade.php`
+- Removed the "Account summary" section from the `partials.ui.page-shell` include.
+- Updated 'Alpaca Connection Account' to 'Broker Connection Account' in `app/Support/Settings/AppSections.php`.
+- Consolidated 'Connect Alpaca Account', 'Create Alpaca Account', and 'Remove Linked Account' actions into a single 'Connection Actions' ui-card structure in `resources/views/customer/broker/index.blade.php`.
+- Cleaned and production-ready the Automation page.
+
+## Current
+- keep deploy scope disciplined:
+  - no blind release from dirty worktrees
+  - only scoped Laravel/Python release branches or worktrees
+- keep verifying the current invariants remain true for any entitled user, not only the original paper test accounts
+- review and stabilize the current dirty worktree in both repos before any push:
+  - `/var/www/html/bismel1.com`
+  - `/home/gusgraphy/Bismel1-ex-py`
+- run live browser QA on `/customer/automation` for both products:
+  - Prime symbol rows
+  - Execution symbol rows
+  - chart popup desktop
+  - chart popup mobile
+  - Execution protections/global guardrails
+- confirm live Prime strategy-status rows are reading canonical slot-scoped runtime docs only after bridge promotion
+- confirm live Execution symbol-state docs update on repeated scheduled runs for all enabled symbols, not just the currently tested example
+- decide the exact push/deploy scope:
+  - Laravel only
+  - Python runtime only
+  - or both repos together after staged review
+- rebuild/redeploy only after that scope is explicitly clean
+
+## Next
+- if broker/data `401` issues recur on live Prime accounts, treat them as credential/data-quality blockers, not product-logic blockers
+- continue release work from isolated staged scopes only, because the product logic is materially healthier than the current repo hygiene
+- once the current worktree is reviewed, commit and push each repo intentionally instead of pushing the full dirty state blindly
+- after deploy, re-run one live Prime paper validation and one live Execution paper validation through the shared Automation page
+- if mobile chart popup QA still shows crowding on device, keep iterating the shared popup layout rather than forking Prime/Execution chart UIs

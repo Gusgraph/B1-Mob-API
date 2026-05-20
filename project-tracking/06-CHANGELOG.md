@@ -1,0 +1,288 @@
+# Changelog
+
+## 2026-05-20
+- added the Bismel1 customer mobile API foundation under `/api/mobile/v1`.
+- added mobile bearer-token auth using hashed, revocable Laravel tokens because Sanctum is not installed.
+- added public mobile endpoints for login, plans, and app config.
+- added authenticated customer mobile endpoints for dashboard, products, accounts, broker accounts, automation, positions, orders, activity, performance, billing, support, and affiliate.
+- added mobile-only response envelope helpers so API responses use `ok/data/meta` or `ok/error`.
+- added mobile middleware that enforces bearer token auth, email verification, customer access, and token expiry/revocation.
+- added local mobile API storage: `mobile_access_tokens`, `mobile_audit_logs`, and `mobile_support_tickets`.
+- added guarded mobile actions for automation symbols, automation toggle, Alpaca credential connection through Laravel encrypted storage, disconnect warnings, manual close confirmation, and support replies.
+- added feature tests for the mobile foundation security and scoping requirements.
+- updated legal UI copy so visible Terms/Privacy references display `Gusgraph` instead of `Gusgraph LLC`.
+
+## 2026-04-12
+- moved the customer Automation symbol picker off the tiny preset-only source and onto a real internal instrument master dataset
+- added future-ready instrument master schema/storage while keeping the current Prime Stocks customer scope locked to stocks
+- added admin-triggered instrument master actions on `Admin > System`:
+  - sync stock instruments from Alpaca
+  - bootstrap from internal cache
+- validated live Alpaca-backed instrument master sync and populated the internal symbol universe with real stock coverage
+- upgraded the Automation symbol selector into a validated autocomplete picker:
+  - search by ticker
+  - search by company name
+  - duplicate rejection
+  - unsupported symbol rejection
+  - no arbitrary text save
+- hardened the real symbol flow so Prime Stocks runtime now uses the same saved account symbol list managed on the Automation page
+- Laravel symbol updates now persist:
+  - `selected_symbols`
+  - `symbol_states`
+  - primary runtime `symbol`
+- blocked non-entitled accounts from using the Automation symbol add/search flow
+- updated scheduler/runtime dispatch so:
+  - active configured symbols are eligible
+  - `paused` / `standby` symbols are excluded
+  - removed symbols stop being dispatched
+  - empty active symbol sets return `no_active_symbols_configured`
+- updated the Automation remove confirmation to warn:
+  - `Positions will stay open if removed`
+- fixed the shared backend market-data path used by Automation rows and the chart modal:
+  - Alpaca market data now uses the Alpaca data host instead of the trading host
+  - historical bars now include correct `start/end` windows
+- validated live backend market data for:
+  - `AAPL`
+  - `NVDA`
+  - `FRO`
+- upgraded the Automation chart modal from minimal line view to candlestick chart view:
+  - OHLC backend payload
+  - candlesticks
+  - right-side price scale
+  - current price line
+  - OHLC legend strip
+  - `4H / 1D / 1M` ranges
+- kept the chart implementation on TradingView `lightweight-charts`, not the full TradingView charting product
+
+## 2026-04-10
+- fixed the main hourly Prime Stocks scheduler path so it now fans out across entitled linked accounts with valid:
+  - `uid`
+  - `account_id`
+  - `alpaca_account_id`
+- confirmed scheduler-driven runtime writes now land under account-scoped Firestore paths:
+  - `users/{uid}/accounts/{accountId}/prime_stocks/current/*`
+- rebuilt the customer Automation page into a customer-first Prime Stocks control page instead of a monitoring/debug wall
+- removed the old numbered account button row and kept the cleaner shared account selector
+- moved Prime Stocks symbol control directly into the Automation page:
+  - add symbol
+  - remove symbol
+  - active/pause mode
+- changed Automation customer wording and status display to customer-facing labels:
+  - `Looking for trade condition`
+  - `IN PROGRESS`
+  - `Ready for trigger`
+  - `Watching for setup`
+  - `Paused`
+- added symbol add autocomplete from recent market snapshots
+- added stronger selector/control borders and cleaner customer visual hierarchy on the Automation page
+- added AI pulse state on the Automation page and gray/off presentation when automation is turned off
+- finalized Prime Stocks runtime exposure-rule enforcement:
+  - per symbol entry `3%`
+  - all-symbol new-position cap `20%`
+  - add-only cap `70%`
+- added new runtime blocked reasons:
+  - `per_symbol_entry_cap_exceeded`
+  - `total_entry_exposure_cap_exceeded`
+  - `total_add_exposure_cap_exceeded`
+- surfaced the exposure-rule summary and current total exposure on the customer Automation page
+- validated with focused suites:
+  - `cd /home/gusgraphy/Bismel1-ex-py && venv/bin/pytest tests/test_scheduler_invocation.py tests/test_prime_stocks_dry_run.py -q`
+  - `cd /var/www/html/bismel1.com && php artisan test tests/Feature/Customer/CustomerAutomationRuntimeTest.php`
+
+## 2026-04-09
+- extended the Laravel Prime Stocks Firestore runtime read bundle to include `runtime_products/prime_stocks/heartbeat/current`
+- expanded `AutomationPageData` so the existing Automation page now surfaces:
+  - runtime health
+  - last run time
+  - run id
+  - trigger source
+  - status
+  - candidate action
+  - execution decision
+  - skipped / blocked reason
+  - latest signal time
+  - last processed bar time
+  - symbol
+  - broker environment
+  - account id / alpaca account id
+  - position state
+  - dollars used
+  - add count / add tiers
+  - trail stop
+  - last action
+  - `Ai_*` state
+  - heartbeat state
+  - order status / ids
+- added a new Prime Stocks runtime monitoring section to `resources/views/customer/automation/index.blade.php`
+- kept the surface read-only and real-data only, using existing Firestore runtime docs and the current customer UI system
+- validated with:
+  - `php -l app/Support/Firestore/FirestoreBridge.php`
+  - `php -l app/Support/ViewData/AutomationPageData.php`
+  - `php -l app/Http/Controllers/Customer/AutomationController.php`
+  - `php artisan test tests/Feature/Customer/CustomerAutomationRuntimeTest.php`
+
+## 2026-04-06
+- fixed the post-OAuth broker credential read mismatch by updating the shared `AlpacaClient` to support both:
+  - manual API-key header auth
+  - OAuth bearer-token auth
+- confirmed successful OAuth callback persistence now produces a usable broker credential record instead of only masked metadata
+- added focused broker coverage for:
+  - OAuth-linked account readiness sync
+  - manual and OAuth credential coexistence
+  - truthful Broker page rendering after OAuth callback persistence
+- aligned the Broker page OAuth feature assertion with the actual rendered access-mode label (`Trade disabled`)
+- relaxed the Alpaca authorize-start gate so `Continue to Alpaca` no longer requires `ALPACA_OAUTH_CLIENT_SECRET` before starting the authorize redirect
+- kept callback/token-exchange gating separate so a missing secret now fails truthfully later on callback instead of blocking the authorize page
+- added focused broker-flow coverage for:
+  - authorize redirect starting with client ID only
+  - callback failure when client secret is still missing
+- updated local `.env` only with the published Alpaca OAuth client ID, redirect URI, authorize URL, and default scope for the live authorize-start path
+- **Alpaca Authorize Page Refinements:**
+    - Removed technical configuration details from `/resources/views/customer/broker/authorize.blade.php`.
+    - Removed the warning card for "Alpaca connection not ready" from `/resources/views/customer/broker/authorize.blade.php`.
+    - Made the "Continue to Alpaca" button always enabled in `/resources/views/customer/broker/authorize.blade.php`.
+    - Updated the page-shell summary title to 'Connect Alpaca Account' in `/resources/views/customer/broker/authorize.blade.php` (later removed).
+    - Changed the icon next to "Authorize Bismel1" to a lock icon (`fa-solid fa-lock`) in `/resources/views/customer/broker/authorize.blade.php`.
+    - Redesigned the "Continue to Alpaca" button to be greenish using inline styles in `/resources/views/customer/broker/authorize.blade.php`.
+    - Centered the "Authorize Bismel1" title within its card using inline style in `/resources/views/customer/broker/authorize.blade.php`.
+    - Centered the `ui-card` itself using `max-width` and `margin: 0 auto` in `/resources/views/customer/broker/authorize.blade.php`.
+    - Centered the header content (icon and "Authorize Bismel1" title) using `text-align: center` on `customer-section__heading` in `/resources/views/customer/broker/authorize.blade.php`.
+    - Centered the action buttons using `text-align: center;` on `ui-form-actions__buttons` and applied `display: inline-block; margin: 0 0.5rem;` to the individual form and anchor elements in `/resources/views/customer/broker/authorize.blade.php`.
+    - Centered the container of the buttons (`div.ui-form-actions`) using `max-width: 600px; margin: 0 auto;` for desktop view in `/resources/views/customer/broker/authorize.blade.php`.
+    - Cleaned up messages in `/resources/views/customer/broker/callback.blade.php`.
+    - Removed the "Workspace summary" section from the `partials.ui.page-shell` include.
+- **Broker Page Consolidation:**
+    - Updated 'Alpaca Connection Workspace' to 'Broker Connection Workspace' in `app/Support/Settings/AppSections.php`.
+    - Consolidated 'Connect Alpaca Account', 'Create Alpaca Account', and 'Remove Linked Account' actions into a single 'Connection Actions' ui-card structure in `resources/views/customer/broker/index.blade.php`.
+
+## 2026-04-07
+- added centralized product-to-asset-scope configuration in `config/bismel1-products.php`
+- added `AssetScope` enum and `ProductAssetScopeResolver`
+- added strict `filterSymbolsForProduct($product, array $symbols)` enforcement before market-data requests
+- added new Alpaca market-data service layer:
+  - `AlpacaMarketDataClient`
+  - `MarketDataIngestionService`
+  - `MarketDataNormalizer`
+  - `MarketDataCacheRepository`
+- added `market_data_snapshots` persistence with `App\Models\MarketDataSnapshot`
+- added latest quote / latest bar / historical bar normalization and caching
+- added stale detection for latest market snapshots
+- updated existing `AlpacaMarketDataService` so Prime Stocks filtering happens before the old bars path runs
+- updated customer dashboard, broker, automation, positions, and orders to consume cached market-data snapshots from the selected Alpaca slot context
+- added focused test coverage for:
+  - symbol filtering by product
+  - quote normalization
+  - bar normalization
+  - stale detection
+  - unsupported symbol handling
+  - customer dashboard market-data rendering
+- added slot-aware manual Alpaca broker management across the Laravel customer area using `broker_connections` as the persisted account-slot record
+- added a new migration for broker slot state:
+  - `slot_number`
+  - `validation_status`
+  - `last_validated_at`
+  - `automation_enabled`
+  - `automation_enabled_at`
+  - `last_error`
+- added `CustomerBrokerAccountSlotService` to provide:
+  - session-backed selected-slot persistence
+  - default `Account 1` / `Account 2` availability
+  - locked slot rendering for Account 3+
+  - slot-aware connection / credential / Alpaca-account resolution
+  - compatibility mapping for older saved connections without `slot_number`
+- updated manual broker credential save so the selected slot is persisted and re-used instead of always creating/reading the latest broker connection
+- added `POST /customer/broker/sync` for slot-scoped credential validation and broker refresh
+- updated broker sync persistence so successful validation now stamps slot-level validation state and failed validation now records slot-level error state
+- changed linked-account entitlement logic from the old paper/live split to the new product rule:
+  - 2 default account slots included
+  - additional account add-ons unlock Account 3+
+- updated customer broker UI to show:
+  - shared account selector
+  - slot-scoped add/edit API credential action
+  - slot-scoped validate connection / refresh broker data action
+  - slot-scoped enable/disable automation action
+- updated customer broker create page to respect the selected slot and show the locked-slot add-on message instead of a dead path
+- updated customer orders, positions, and automation pages to render the shared account selector and use the selected broker slot context
+- updated focused regression coverage so the new product rule is enforced by tests:
+  - customer broker secret flows still pass
+  - trading pages still pass with selected-slot compatibility
+  - entitlement coverage now blocks Account 3 instead of the old second-account rule
+- restored the manual Alpaca API-key connection option to the existing Broker page action area without removing OAuth
+- the Broker page now presents all three existing actions together:
+  - `Connect Alpaca Account (OAuth)`
+  - `Connect with API Keys`
+  - `Create Alpaca Account`
+- kept the existing manual route/page at `/customer/broker/create`
+- kept the existing OAuth authorize route at `/customer/broker/alpaca/authorize`
+- added/updated Broker page rendering coverage so both connection methods are asserted in the same existing page
+- identified the exact live Alpaca token-exchange rejection as `invalid_client` from Alpaca response body `{"code":40110000,"message":"invalid_client"}`
+- updated `AlpacaClient` so the callback now surfaces that exact rejection cause to the user instead of the generic `was rejected` message
+- expanded safe token-exchange logging to record Alpaca response `code` and `message` without exposing the raw client secret
+- added focused OAuth broker coverage for the live-style `invalid_client` rejection path
+- kept the Alpaca authorize redirect environment-agnostic by verifying the generated authorize URL omits `env`
+- tightened the Alpaca OAuth token exchange path in `AlpacaClient` so it now:
+  - posts to `https://api.alpaca.markets/oauth/token`
+  - uses `application/x-www-form-urlencoded`
+  - preserves the safe Alpaca rejection details (`error`, `error_description`) instead of collapsing all `400/401/403` responses into a generic rejection
+  - logs safe token-exchange request/response context without exposing the raw client secret
+- added focused OAuth broker coverage for:
+  - authorize redirect omitting `env`
+  - exact token-exchange request shape
+  - detailed safe rejection messaging
+- confirmed the broker authorize page active-state bug was not in the controller or Blade logic:
+  - `BrokerController::alpacaOauthConfig()` now resolves `authorize_ready=true` and `callback_ready=true`
+  - `resources/views/customer/broker/authorize.blade.php` already renders the active POST form branch when that flag is true
+- cleared stale Laravel runtime state with:
+  - `php artisan config:clear`
+  - `php artisan view:clear`
+- strengthened authorize-page coverage so the feature test now asserts the enabled branch by checking the disabled button markup is absent when OAuth config is present
+- **Automation Page Refinements:**
+    - Cleaned and production-ready the Automation page, removing all placeholder content, dev notes, fake states, and non-functional UI elements.
+    - Rephrased customer-facing text to be production-ready, removing technical jargon, internal process notes, and development-specific references.
+    - Removed the religious invocation `﷽` from `resources/views/customer/automation/index.blade.php`.
+    - Updated `app/Support/ViewData/AutomationPageData.php` to generalize descriptions and remove references to internal technical details like Firestore and Cloud Run.
+    - Updated `resources/views/customer/automation/index.blade.php` to simplify body texts and remove technical system explanations.
+
+## 2026-04-08
+- expanded Prime Stocks runtime AI validation coverage in `tests/test_prime_stocks_dry_run.py`
+- added focused scenario coverage for:
+  - allow path with explicit `risk_on / bullish / safe` cache state
+  - bearish new-entry block
+  - unsafe buy-side block
+  - risk_off add block
+  - exit-allowed behavior under `risk_off`
+  - exit-allowed behavior under `unsafe`
+  - explicit `ai_cache_unavailable` blocking
+- verified the focused Prime Stocks runtime test file passes with:
+  - `cd /home/gusgraphy/Bismel1-ex-py && venv/bin/pytest tests/test_prime_stocks_dry_run.py`
+- confirmed a live VM-side environment blocker still exists for Firestore proof:
+  - ADC is present
+  - Firestore access to project `bismel1-1` is denied from this VM
+  - repo defaults currently resolve to `servgraph`, where the Firestore DB is missing
+- added shared Prime Stocks AI cache records in the Python runtime Firestore path:
+  - `ai_market/current`
+  - `ai_symbols/{SYMBOL}`
+- added reusable Gemini scoring provider/service in the Python runtime repo
+- added non-hot-path AI scoring script:
+  - `scripts/score_prime_stocks_ai.py`
+- refactored the existing Gemini sentiment test script to use the shared Gemini service
+- added Prime Stocks runtime support for cached AI decisions only:
+  - no direct Gemini call in the hot execution path
+  - deterministic stale / unavailable AI blocking
+  - built-in buy-side blocking rules for:
+    - `Ai_safety_label=unsafe`
+    - `Ai_regime_label=risk_off`
+    - `Ai_sentiment_label=bearish`
+- extended Prime Stocks runtime payloads so `Ai_*` fields now flow into:
+  - snapshot
+  - signal
+  - state
+  - execution
+  - action
+  - log
+- added focused Python coverage for:
+  - Gemini output normalization
+  - AI cache read/write
+  - stale AI handling
+  - Prime Stocks AI-based blocking
+  - runtime AI payload visibility
