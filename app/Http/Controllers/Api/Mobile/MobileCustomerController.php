@@ -168,9 +168,21 @@ class MobileCustomerController extends Controller
         ]);
     }
 
-    public function accountSnapshot(Request $request, int $account): JsonResponse
+    public function accountSnapshot(Request $request, string $account): JsonResponse
     {
-        $resolvedAccount = $this->ownedAccount($request, $account);
+        $currentAccount = $this->currentAccount($request, 'dashboard');
+        $brokerConnection = $this->brokerConnectionForMobileAccount($currentAccount, $account);
+
+        if ($brokerConnection) {
+            $slotNumber = (int) ($brokerConnection->slot_number ?? 1);
+
+            return MobileApiResponse::success([
+                'account_snapshot' => $this->accountSnapshotPayload($currentAccount, $this->slotContext($request, $currentAccount, $slotNumber)),
+                'broker_account' => $this->brokerAccountPayload($brokerConnection),
+            ]);
+        }
+
+        $resolvedAccount = ctype_digit($account) ? $this->ownedAccount($request, (int) $account) : null;
 
         if (! $resolvedAccount) {
             return MobileApiResponse::error('account_not_found', 'Account was not found for this user.', [], 404);
@@ -512,7 +524,10 @@ class MobileCustomerController extends Controller
         $account = $this->currentAccount($request, 'trading');
 
         return MobileApiResponse::success([
-            'positions' => $this->positionsQuery($account)->get()->map(fn (AlpacaPosition $position): array => $this->positionPayload($position))->values()->all(),
+            'positions' => $this->positionsQuery($account)->get()->map(fn (AlpacaPosition $position): array => $this->positionPayload(
+                $position,
+                $this->brokerConnectionForAlpacaAccount($account, $position->alpaca_account_id),
+            ))->values()->all(),
         ]);
     }
 
@@ -554,8 +569,13 @@ class MobileCustomerController extends Controller
 
     public function orders(Request $request): JsonResponse
     {
+        $account = $this->currentAccount($request, 'trading');
+
         return MobileApiResponse::success([
-            'orders' => $this->ordersQuery($this->currentAccount($request, 'trading'))->get()->map(fn (AlpacaOrder $order): array => $this->orderPayload($order))->values()->all(),
+            'orders' => $this->ordersQuery($account)->get()->map(fn (AlpacaOrder $order): array => $this->orderPayload(
+                $order,
+                $this->brokerConnectionForAlpacaAccount($account, $order->alpaca_account_id),
+            ))->values()->all(),
         ]);
     }
 
@@ -573,15 +593,21 @@ class MobileCustomerController extends Controller
     public function tradeActivity(Request $request): JsonResponse
     {
         $account = $this->currentAccount($request, 'trading');
-        $orders = $this->ordersQuery($account)->limit(27)->get()->map(fn (AlpacaOrder $order): array => [
-            'type' => 'trade',
-            'symbol' => $order->symbol,
-            'label' => Str::headline(trim(($order->side ?? 'order').' '.($order->status ?? 'recorded'))),
-            'detail' => 'Trade activity recorded for '.$order->symbol.'.',
-            'product' => $this->safeProductLabel($order->request_action),
-            'account_label' => $this->accountPayload($account)['label'],
-            'timestamp' => $order->submitted_at?->toIso8601String() ?? $order->created_at?->toIso8601String(),
-        ])->values()->all();
+        $orders = $this->ordersQuery($account)->limit(27)->get()->map(function (AlpacaOrder $order) use ($account): array {
+            $brokerConnection = $this->brokerConnectionForAlpacaAccount($account, $order->alpaca_account_id);
+
+            return [
+                'type' => 'trade',
+                'symbol' => $order->symbol,
+                'label' => Str::headline(trim(($order->side ?? 'order').' '.($order->status ?? 'recorded'))),
+                'detail' => 'Trade activity recorded for '.$order->symbol.'.',
+                'product' => $this->safeProductLabel($order->request_action),
+                'account_label' => $this->brokerAccountLabel($brokerConnection) ?? ($this->accountPayload($account)['label'] ?? 'Account'),
+                'broker_account_ref' => $brokerConnection?->getKey(),
+                'slot_number' => $brokerConnection ? (int) ($brokerConnection->slot_number ?? 1) : null,
+                'timestamp' => $order->submitted_at?->toIso8601String() ?? $order->created_at?->toIso8601String(),
+            ];
+        })->values()->all();
 
         return MobileApiResponse::success(['activity' => $orders]);
     }
@@ -841,6 +867,53 @@ class MobileCustomerController extends Controller
             ->first();
     }
 
+    protected function brokerConnectionForMobileAccount(?Account $account, string $accountRef): ?BrokerConnection
+    {
+        if (! $account) {
+            return null;
+        }
+
+        $accountRef = trim($accountRef);
+        $connections = $account->brokerConnections;
+
+        if (! $connections || ! $connections->count()) {
+            $connections = BrokerConnection::query()
+                ->where('account_id', $account->getKey())
+                ->with(['brokerCredentials', 'alpacaAccounts'])
+                ->get();
+        }
+
+        return $connections->first(function (BrokerConnection $connection) use ($accountRef): bool {
+            $slotNumber = (string) ((int) ($connection->slot_number ?? 1));
+
+            return (string) $connection->getKey() === $accountRef
+                || $slotNumber === $accountRef
+                || (string) ($connection->name ?? '') === $accountRef;
+        });
+    }
+
+    protected function brokerConnectionForAlpacaAccount(?Account $account, mixed $alpacaAccountId): ?BrokerConnection
+    {
+        if (! $account || ! $alpacaAccountId) {
+            return null;
+        }
+
+        $connections = $account->brokerConnections;
+        $connection = $connections?->first(fn (BrokerConnection $item): bool => (bool) $item->alpacaAccounts?->contains(
+            fn ($alpacaAccount): bool => (int) $alpacaAccount->getKey() === (int) $alpacaAccountId,
+        ));
+
+        if ($connection) {
+            return $connection;
+        }
+
+        return BrokerConnection::query()
+            ->where('account_id', $account->getKey())
+            ->whereHas('alpacaAccounts', fn ($query) => $query->whereKey($alpacaAccountId))
+            ->with(['brokerCredentials', 'alpacaAccounts'])
+            ->first();
+    }
+
     protected function positionsQuery(?Account $account, ?int $alpacaAccountId = null)
     {
         return AlpacaPosition::query()
@@ -924,17 +997,26 @@ class MobileCustomerController extends Controller
     protected function accountSnapshotPayload(?Account $account, array $slot): array
     {
         $alpacaAccount = $slot['alpaca_account'] ?? null;
+        $brokerConnection = $alpacaAccount ? $this->brokerConnectionForAlpacaAccount($account, $alpacaAccount->getKey()) : null;
+        $buyingPower = $this->numberOrNull($alpacaAccount?->buying_power);
+        $equity = $this->numberOrNull($alpacaAccount?->equity);
+        $lastSync = $alpacaAccount?->last_synced_at?->toIso8601String();
 
         return [
             'account' => $this->accountPayload($account),
+            'broker_account_ref' => $brokerConnection?->getKey(),
+            'slot_number' => $brokerConnection ? (int) ($brokerConnection->slot_number ?? 1) : (int) ($slot['slot'] ?? 1),
+            'buying_power' => $buyingPower,
+            'equity' => $equity,
+            'last_sync' => $lastSync,
             'broker' => $alpacaAccount ? [
                 'broker' => 'alpaca',
                 'environment' => $alpacaAccount->environment,
                 'connected' => in_array(strtolower((string) $alpacaAccount->sync_status), ['success', 'partial_success'], true),
                 'status' => $alpacaAccount->sync_status,
-                'buying_power' => $this->numberOrNull($alpacaAccount->buying_power),
-                'equity' => $this->numberOrNull($alpacaAccount->equity),
-                'last_sync' => $alpacaAccount->last_synced_at?->toIso8601String(),
+                'buying_power' => $buyingPower,
+                'equity' => $equity,
+                'last_sync' => $lastSync,
                 'account_label' => $this->maskedAccountLabel($alpacaAccount),
             ] : null,
         ];
@@ -977,6 +1059,17 @@ class MobileCustomerController extends Controller
         $suffix = trim((string) ($alpacaAccount?->account_number ?? ''));
 
         return ($alpacaAccount?->name ?: 'Alpaca account').($suffix !== '' ? ' ****'.substr($suffix, -4) : '');
+    }
+
+    protected function brokerAccountLabel(?BrokerConnection $connection): ?string
+    {
+        if (! $connection) {
+            return null;
+        }
+
+        $alpacaAccount = $connection->alpacaAccounts?->first(fn ($item) => (bool) $item->is_active) ?? $connection->alpacaAccounts?->first();
+
+        return $alpacaAccount ? $this->maskedAccountLabel($alpacaAccount) : ($connection->name ?? 'Account '.(int) ($connection->slot_number ?? 1));
     }
 
     protected function symbolRows(?Account $account, int $slotNumber, string $product): array
@@ -1031,9 +1124,13 @@ class MobileCustomerController extends Controller
         ];
     }
 
-    protected function positionPayload(AlpacaPosition $position): array
+    protected function positionPayload(AlpacaPosition $position, ?BrokerConnection $brokerConnection = null): array
     {
         return [
+            'account_ref' => 'account-'.$position->account_id,
+            'broker_account_ref' => $brokerConnection?->getKey(),
+            'slot_number' => $brokerConnection ? (int) ($brokerConnection->slot_number ?? 1) : null,
+            'account_label' => $this->brokerAccountLabel($brokerConnection),
             'symbol' => $position->symbol,
             'qty' => $this->numberOrNull($position->qty),
             'avg_entry' => $this->numberOrNull($position->avg_entry_price),
@@ -1046,10 +1143,14 @@ class MobileCustomerController extends Controller
         ];
     }
 
-    protected function orderPayload(AlpacaOrder $order): array
+    protected function orderPayload(AlpacaOrder $order, ?BrokerConnection $brokerConnection = null): array
     {
         return [
             'order_ref' => (int) $order->getKey(),
+            'account_ref' => 'account-'.$order->account_id,
+            'broker_account_ref' => $brokerConnection?->getKey(),
+            'slot_number' => $brokerConnection ? (int) ($brokerConnection->slot_number ?? 1) : null,
+            'account_label' => $this->brokerAccountLabel($brokerConnection),
             'symbol' => $order->symbol,
             'side' => $order->side,
             'status' => $order->status,
