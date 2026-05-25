@@ -619,13 +619,21 @@ class MobileCustomerController extends Controller
 
     public function performanceSummary(Request $request): JsonResponse
     {
-        $positions = $this->positionsQuery($this->currentAccount($request, 'trading'))->get();
+        $account = $this->currentAccount($request, 'trading');
+        $accountRef = trim((string) ($request->query('account') ?? $request->query('broker_account') ?? $request->query('slot') ?? ''));
+        $brokerConnection = $accountRef !== '' ? $this->brokerConnectionForMobileAccount($account, $accountRef) : null;
+        $alpacaAccount = $brokerConnection?->alpacaAccounts?->first(fn ($item): bool => (bool) $item->is_active)
+            ?? $brokerConnection?->alpacaAccounts?->first();
+        $alpacaAccountId = $alpacaAccount?->getKey();
+        $positions = $this->positionsQuery($account, $alpacaAccountId ? (int) $alpacaAccountId : null)->get();
+        $realizedSummary = $this->realizedPerformanceSummary($account, $alpacaAccountId ? (int) $alpacaAccountId : null, $brokerConnection);
 
         return MobileApiResponse::success([
             'summary' => [
                 'market_value' => round($positions->sum(fn (AlpacaPosition $position) => (float) $position->market_value), 2),
                 'unrealized_pl' => round($positions->sum(fn (AlpacaPosition $position) => (float) $position->unrealized_pl), 2),
                 'open_positions_count' => $positions->count(),
+                ...$realizedSummary,
             ],
         ]);
     }
@@ -645,6 +653,81 @@ class MobileCustomerController extends Controller
                 ];
             })->values()->all(),
         ]);
+    }
+
+    protected function realizedPerformanceSummary(?Account $account, ?int $alpacaAccountId = null, ?BrokerConnection $brokerConnection = null): array
+    {
+        $orderTrades = $this->ordersQuery($account, $alpacaAccountId)
+            ->get()
+            ->map(fn (AlpacaOrder $order): ?float => $this->realizedValueFromRecord($order, ['realized_pl', 'realized_pnl', 'realized_profit_loss', 'profit_loss', 'pnl']))
+            ->filter(fn (?float $value): bool => $value !== null)
+            ->values();
+        $activityTrades = $orderTrades->isNotEmpty()
+            ? collect()
+            : $this->realizedValuesFromActivityLogs($account, $alpacaAccountId, $brokerConnection);
+        $trades = $orderTrades->isNotEmpty() ? $orderTrades : $activityTrades;
+        $tradeCount = $trades->count();
+        $winningTrades = $trades->filter(fn (float $value): bool => $value > 0)->count();
+        $losingTrades = $trades->filter(fn (float $value): bool => $value < 0)->count();
+        $realizedPl = round((float) $trades->sum(), 2);
+
+        return [
+            'realized_pl' => $realizedPl,
+            'realized_pnl' => $realizedPl,
+            'closed_trades_count' => $tradeCount,
+            'winning_trades_count' => $winningTrades,
+            'losing_trades_count' => $losingTrades,
+            'win_rate' => $tradeCount > 0 ? round(($winningTrades / $tradeCount) * 100, 2) : 0.0,
+        ];
+    }
+
+    protected function realizedValuesFromActivityLogs(?Account $account, ?int $alpacaAccountId = null, ?BrokerConnection $brokerConnection = null)
+    {
+        if (! $account) {
+            return collect();
+        }
+
+        return $account->activityLogs()
+            ->latest()
+            ->get()
+            ->filter(function ($log) use ($alpacaAccountId, $brokerConnection): bool {
+                $context = (array) ($log->context ?? []);
+
+                if ($alpacaAccountId && (int) data_get($context, 'alpaca_account_id') !== $alpacaAccountId) {
+                    return false;
+                }
+
+                if ($brokerConnection) {
+                    $slot = data_get($context, 'slot_number') ?? data_get($context, 'account_slot') ?? data_get($context, 'slot');
+                    $brokerAccountRef = data_get($context, 'broker_account_ref') ?? data_get($context, 'broker_account_id');
+
+                    if ($brokerAccountRef && (string) $brokerAccountRef !== (string) $brokerConnection->getKey()) {
+                        return false;
+                    }
+
+                    if ($slot && (string) $slot !== (string) ((int) ($brokerConnection->slot_number ?? 1))) {
+                        return false;
+                    }
+                }
+
+                return true;
+            })
+            ->map(fn ($log): ?float => $this->realizedValueFromRecord((array) ($log->context ?? []), ['realized_pl', 'realized_pnl', 'realized_profit_loss', 'profit_loss', 'pnl']))
+            ->filter(fn (?float $value): bool => $value !== null)
+            ->values();
+    }
+
+    protected function realizedValueFromRecord(mixed $record, array $keys): ?float
+    {
+        foreach ($keys as $key) {
+            $value = is_array($record) ? data_get($record, $key) : $record?->getAttribute($key);
+
+            if (is_numeric($value)) {
+                return (float) $value;
+            }
+        }
+
+        return null;
     }
 
     public function billingSummary(Request $request): JsonResponse
