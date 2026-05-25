@@ -1038,6 +1038,10 @@ class MobileCustomerController extends Controller
     {
         $alpacaAccount = $connection->alpacaAccounts->first(fn ($item) => (bool) $item->is_active) ?? $connection->alpacaAccounts->first();
         $credential = $connection->brokerCredentials->sortByDesc('id')->first();
+        $positions = $alpacaAccount?->positions ?? collect();
+        $orders = $alpacaAccount?->orders ?? collect();
+        $openPositions = $positions->filter(fn (AlpacaPosition $position) => abs((float) $position->qty) > 0);
+        $pendingOrders = $orders->filter(fn (AlpacaOrder $order) => $this->orderPending($order));
 
         return [
             'broker_account_ref' => (int) $connection->getKey(),
@@ -1048,6 +1052,9 @@ class MobileCustomerController extends Controller
             'status' => $alpacaAccount?->sync_status ?? $connection->validation_status ?? 'pending',
             'buying_power' => $this->numberOrNull($alpacaAccount?->buying_power),
             'equity' => $this->numberOrNull($alpacaAccount?->equity),
+            'open_positions_count' => $openPositions->count(),
+            'orders_count' => $orders->count(),
+            'pending_orders_count' => $pendingOrders->count(),
             'last_sync' => $alpacaAccount?->last_synced_at?->toIso8601String() ?? $connection->last_synced_at?->toIso8601String(),
             'account_label' => $alpacaAccount ? $this->maskedAccountLabel($alpacaAccount) : ($connection->name ?? 'Account '.(int) ($connection->slot_number ?? 1)),
             'automation_enabled' => (bool) ($connection->automation_enabled ?? false),
