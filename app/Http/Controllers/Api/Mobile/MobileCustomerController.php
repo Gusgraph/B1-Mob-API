@@ -620,7 +620,15 @@ class MobileCustomerController extends Controller
     public function performanceSummary(Request $request): JsonResponse
     {
         $account = $this->currentAccount($request, 'trading');
-        $accountRef = trim((string) ($request->query('account') ?? $request->query('broker_account') ?? $request->query('slot') ?? ''));
+        $accountRef = trim((string) (
+            $request->query('broker_account_ref')
+            ?? $request->query('broker_account')
+            ?? $request->query('account_slot')
+            ?? $request->query('slot_number')
+            ?? $request->query('slot')
+            ?? $request->query('account')
+            ?? ''
+        ));
         $brokerConnection = $accountRef !== '' ? $this->brokerConnectionForMobileAccount($account, $accountRef) : null;
         $alpacaAccount = $brokerConnection?->alpacaAccounts?->first(fn ($item): bool => (bool) $item->is_active)
             ?? $brokerConnection?->alpacaAccounts?->first();
