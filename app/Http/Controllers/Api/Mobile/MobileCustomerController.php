@@ -219,6 +219,12 @@ class MobileCustomerController extends Controller
 
     public function connectAlpaca(Request $request): JsonResponse
     {
+        $request->merge([
+            'environment' => $request->input('environment', 'paper'),
+            'access_key_id' => $request->input('access_key_id', $request->input('api_key')),
+            'access_secret' => $request->input('access_secret', $request->input('api_secret')),
+        ]);
+
         $validator = Validator::make($request->all(), [
             'account_slot' => ['nullable', 'integer', 'min:1', 'max:19'],
             'account_label' => ['nullable', 'string', 'max:73'],

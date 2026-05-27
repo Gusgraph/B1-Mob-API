@@ -172,6 +172,23 @@ class MobileApiFoundationTest extends TestCase
         $this->assertStringNotContainsString('PKSECRET12345', $response->getContent());
     }
 
+    public function test_broker_connect_accepts_mobile_key_aliases(): void
+    {
+        [$user, $account] = $this->createAccessContext();
+        $this->seedConfirmedBismel1Subscription($account, 'BISMILLAH1_BOT_PRIME');
+
+        $response = $this->postJson('/api/mobile/v1/brokers/alpaca/connect', [
+            'api_key' => 'PKALIAS12345',
+            'api_secret' => 'ALIAS-SECRET-VALUE',
+        ], $this->bearerHeaders($user))
+            ->assertCreated()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('data.status', 'pending_validation');
+
+        $this->assertStringNotContainsString('ALIAS-SECRET-VALUE', $response->getContent());
+        $this->assertStringNotContainsString('PKALIAS12345', $response->getContent());
+    }
+
     public function test_manual_close_requires_confirmation(): void
     {
         [$user, $account] = $this->createAccessContext();
