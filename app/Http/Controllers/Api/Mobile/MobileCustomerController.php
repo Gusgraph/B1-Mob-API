@@ -408,8 +408,13 @@ class MobileCustomerController extends Controller
     {
         $account = $this->currentAccount($request, 'automation');
         $product = $this->normalizeProduct($product);
-        $slot = $this->slotContext($request, $account, $accountSlot, $product);
         $entitlements = $this->entitlements($account);
+
+        if (! $this->productEntitled($product, $entitlements)) {
+            return MobileApiResponse::error('product_plan_required', 'This product is not active for this account.', [], 403);
+        }
+
+        $slot = $this->slotContext($request, $account, $accountSlot, $product);
 
         return MobileApiResponse::success([
             'product' => $this->productPayload($product, $this->productName($product), $account, $entitlements),
@@ -422,8 +427,16 @@ class MobileCustomerController extends Controller
 
     public function automationSymbols(Request $request, string $product, int $accountSlot): JsonResponse
     {
+        $account = $this->currentAccount($request, 'automation');
+        $product = $this->normalizeProduct($product);
+        $entitlements = $this->entitlements($account);
+
+        if (! $this->productEntitled($product, $entitlements)) {
+            return MobileApiResponse::error('product_plan_required', 'This product is not active for this account.', [], 403);
+        }
+
         return MobileApiResponse::success([
-            'symbols' => $this->symbolRows($this->currentAccount($request, 'automation'), $accountSlot, $this->normalizeProduct($product)),
+            'symbols' => $this->symbolRows($account, $accountSlot, $product),
         ]);
     }
 
@@ -1090,17 +1103,47 @@ class MobileCustomerController extends Controller
     protected function productEntitled(string $product, array $entitlements): bool
     {
         return match ($this->normalizeProduct($product)) {
-            'execution' => (bool) data_get($entitlements, 'capabilities.can_use_execute', false),
-            default => (bool) data_get($entitlements, 'capabilities.can_use_stocks_automation', false),
+            'execution' => $this->entitlementEnabled($entitlements, [
+                'capabilities.can_use_execute',
+                'capabilities.can_use_execution',
+                'capabilities.execution',
+                'products.execution.active',
+                'products.execute.active',
+                'active_products.execution',
+                'active_products.execute',
+            ]),
+            default => $this->entitlementEnabled($entitlements, [
+                'capabilities.can_use_stocks_automation',
+                'capabilities.can_use_prime_stocks',
+                'capabilities.prime_stocks',
+                'capabilities.stocks_automation',
+                'products.prime_stocks.active',
+                'products.prime.active',
+                'active_products.prime_stocks',
+                'active_products.prime',
+            ]),
         };
     }
 
     protected function activeProducts(array $entitlements): array
     {
         return collect([
-            (bool) data_get($entitlements, 'capabilities.can_use_stocks_automation', false) ? ['code' => 'prime_stocks', 'name' => 'Prime Stocks'] : null,
-            (bool) data_get($entitlements, 'capabilities.can_use_execute', false) ? ['code' => 'execution', 'name' => 'Execution'] : null,
+            $this->productEntitled('prime_stocks', $entitlements) ? ['code' => 'prime_stocks', 'name' => 'Prime Stocks'] : null,
+            $this->productEntitled('execution', $entitlements) ? ['code' => 'execution', 'name' => 'Execution'] : null,
         ])->filter()->values()->all();
+    }
+
+    protected function entitlementEnabled(array $entitlements, array $paths): bool
+    {
+        foreach ($paths as $path) {
+            $value = data_get($entitlements, $path);
+
+            if ($value === true || $value === 1 || $value === '1' || $value === 'active' || $value === 'enabled') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected function productName(string $product): string
@@ -1234,7 +1277,11 @@ class MobileCustomerController extends Controller
         $slotCode = app(CustomerBrokerAccountSlotService::class)->slotInternalCode($slotNumber);
         $slotProfile = data_get($automationSetting?->settings, 'account_slots.'.$slotCode, []);
         $productConfig = data_get($slotProfile, 'product_configs.'.$product, []);
-        $states = data_get($productConfig, 'symbol_states', data_get($slotProfile, 'symbol_states', []));
+        $states = data_get($productConfig, 'symbol_states');
+
+        if ($states === null && $product === 'prime_stocks') {
+            $states = data_get($slotProfile, 'symbol_states', []);
+        }
 
         return is_array($states) ? $states : [];
     }
@@ -1242,9 +1289,18 @@ class MobileCustomerController extends Controller
     protected function saveSymbolStates(?Account $account, $user, int $slotNumber, string $product, array $states): void
     {
         $selectedSymbols = collect($states)->pluck('symbol')->filter()->values()->all();
-        $profile = $product === 'execution'
-            ? ['product_configs' => [$product => ['selected_symbols' => $selectedSymbols, 'symbol_states' => $states, 'symbols_updated_at' => now()->toIso8601String()]]]
-            : ['selected_symbols' => $selectedSymbols, 'symbol_states' => $states, 'symbols_updated_at' => now()->toIso8601String()];
+        $productConfig = [
+            'selected_symbols' => $selectedSymbols,
+            'symbol_states' => $states,
+            'symbols_updated_at' => now()->toIso8601String(),
+        ];
+        $profile = [
+            'product_configs' => [$product => $productConfig],
+        ];
+
+        if ($product === 'prime_stocks') {
+            $profile = array_merge($profile, $productConfig);
+        }
 
         app(CustomerBrokerAccountSlotService::class)->upsertSlotProfile($account, $user, $slotNumber, $profile);
     }
