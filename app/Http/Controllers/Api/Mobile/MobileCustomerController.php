@@ -126,11 +126,8 @@ class MobileCustomerController extends Controller
             'open_positions_count' => $positions->count(),
             'orders_count' => $orders->count(),
             'latest_activity' => array_slice($activity, 0, 11),
-            'alerts' => [
-                'trial_locked' => ! (bool) data_get($entitlements, 'subscription_active', false),
-                'broker_connected' => $slot['alpaca_account'] !== null,
-                'admin_features_exposed' => false,
-            ],
+            'alerts' => $this->dashboardAlerts($entitlements, $slot),
+            'status_summary' => $this->dashboardStatusSummary($entitlements, $slot),
         ]);
     }
 
@@ -145,6 +142,53 @@ class MobileCustomerController extends Controller
                 $this->productPayload('execution', 'Execution', $account, $entitlements),
             ])->values()->all(),
         ]);
+    }
+
+    protected function dashboardAlerts(array $entitlements, array $slot): array
+    {
+        $alerts = [];
+
+        if (! (bool) data_get($entitlements, 'subscription_active', false)) {
+            $alerts[] = [
+                'type' => 'plan_required',
+                'severity' => 'warning',
+                'title' => 'Activate Your Plan',
+                'message' => 'Your plan needs to be active before automation can run.',
+                'action_label' => 'Review Plan',
+            ];
+        }
+
+        if (($slot['alpaca_account'] ?? null) === null) {
+            $alerts[] = [
+                'type' => 'trading_account_required',
+                'severity' => 'warning',
+                'title' => 'Connect Trading Account',
+                'message' => 'Connect an eligible trading account before using live automation.',
+                'action_label' => 'Connect Account',
+            ];
+        }
+
+        return $alerts ?: [[
+            'type' => 'all_clear',
+            'severity' => 'info',
+            'title' => 'All Clear',
+            'message' => 'No urgent items right now.',
+            'action_label' => 'Dismiss',
+        ]];
+    }
+
+    protected function dashboardStatusSummary(array $entitlements, array $slot): array
+    {
+        $planActive = (bool) data_get($entitlements, 'subscription_active', false);
+        $accountConnected = ($slot['alpaca_account'] ?? null) !== null;
+        $automationEnabled = (bool) (($slot['connection'] ?? null)?->automation_enabled ?? false);
+
+        return [
+            'plan_status_label' => $planActive ? 'Active' : 'Needs activation',
+            'trading_account_status_label' => $accountConnected ? 'Connected' : 'Not connected',
+            'automation_status_label' => $automationEnabled ? 'Active' : 'Off',
+            'account_access_label' => ($planActive && $accountConnected) ? 'Ready' : 'Needs review',
+        ];
     }
 
     public function productOverview(Request $request, string $product): JsonResponse
@@ -236,21 +280,21 @@ class MobileCustomerController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return MobileApiResponse::error('validation_failed', 'Check the broker connection fields.', $validator->errors()->toArray(), 422);
+            return MobileApiResponse::error('validation_failed', 'Check the trading account fields.', $validator->errors()->toArray(), 422);
         }
 
         $account = $this->currentAccount($request, 'broker');
         $entitlements = $this->entitlements($account);
 
         if (! (bool) data_get($entitlements, 'subscription_active', false)) {
-            return MobileApiResponse::error('trial_locked', 'Broker connection is locked until an active product subscription is available.', [], 403);
+            return MobileApiResponse::error('plan_required', 'Trading account setup is available after your plan is active.', [], 403);
         }
 
         $slotNumber = (int) ($request->integer('account_slot') ?: 1);
         $slotService = app(CustomerBrokerAccountSlotService::class);
 
         if (! $slotService->canUseAccountSlot($account, $slotNumber, $entitlements)) {
-            return MobileApiResponse::error('account_slot_locked', 'This broker account slot is locked for the current plan.', ['account_slot' => $slotNumber], 403);
+            return MobileApiResponse::error('trading_account_slot_unavailable', 'Your current plan does not include this trading account slot.', [], 403);
         }
 
         $connection = DB::transaction(function () use ($account, $request, $slotNumber, $slotService): BrokerConnection {
@@ -316,7 +360,7 @@ class MobileCustomerController extends Controller
         $connection = $this->brokerConnectionForAccount($account, $brokerAccount);
 
         if (! $connection) {
-            return MobileApiResponse::error('broker_account_not_found', 'Broker account was not found for this user.', [], 404);
+            return MobileApiResponse::error('trading_account_not_found', 'Trading account was not found.', [], 404);
         }
 
         $connection->load(['alpacaAccounts.positions', 'alpacaAccounts.orders', 'brokerCredentials']);
@@ -324,7 +368,7 @@ class MobileCustomerController extends Controller
         $pendingOrders = $connection->alpacaAccounts->flatMap->orders->filter(fn (AlpacaOrder $order) => $this->orderPending($order));
 
         if ($openPositions->isNotEmpty() || $pendingOrders->isNotEmpty()) {
-            return MobileApiResponse::error('disconnect_warning_required', 'Disconnect is blocked while open positions or pending orders are visible. Review warnings in the web flow before disconnecting.', [
+            return MobileApiResponse::error('disconnect_warning_required', 'Disconnect is blocked while open positions or pending orders are visible.', [
                 'open_positions_count' => $openPositions->count(),
                 'pending_orders_count' => $pendingOrders->count(),
                 'warning_required' => true,
@@ -354,7 +398,7 @@ class MobileCustomerController extends Controller
         $connection = $this->brokerConnectionForAccount($this->currentAccount($request, 'broker'), $brokerAccount);
 
         if (! $connection) {
-            return MobileApiResponse::error('broker_account_not_found', 'Broker account was not found for this user.', [], 404);
+            return MobileApiResponse::error('trading_account_not_found', 'Trading account was not found.', [], 404);
         }
 
         return MobileApiResponse::success(['broker_account' => $this->brokerAccountPayload($connection)]);
@@ -399,11 +443,11 @@ class MobileCustomerController extends Controller
         $entitlements = $this->entitlements($account);
 
         if (! $this->productEntitled($product, $entitlements)) {
-            return MobileApiResponse::error('product_entitlement_required', 'This product is not active for the selected account.', [], 403);
+            return MobileApiResponse::error('product_plan_required', 'This product is not active for this account.', [], 403);
         }
 
         if (! app(CustomerBrokerAccountSlotService::class)->canUseAccountSlot($account, $accountSlot, $entitlements)) {
-            return MobileApiResponse::error('account_slot_locked', 'This account slot is locked for the current plan.', ['account_slot' => $accountSlot], 403);
+            return MobileApiResponse::error('trading_account_slot_unavailable', 'Your current plan does not include this trading account slot.', [], 403);
         }
 
         $symbol = app(ProductAssetScopeResolver::class)->normalizeSymbol((string) $request->input('symbol'));
@@ -448,7 +492,7 @@ class MobileCustomerController extends Controller
         $entitlements = $this->entitlements($account);
 
         if (! $this->productEntitled($product, $entitlements)) {
-            return MobileApiResponse::error('product_entitlement_required', 'This product is not active for the selected account.', [], 403);
+            return MobileApiResponse::error('product_plan_required', 'This product is not active for this account.', [], 403);
         }
 
         $symbol = strtoupper(trim($symbol));
@@ -458,7 +502,7 @@ class MobileCustomerController extends Controller
         $pendingOrder = $this->ordersQuery($account, $alpacaAccountId)->where('symbol', $symbol)->get()->first(fn (AlpacaOrder $order) => $this->orderPending($order));
 
         if ($openPosition || $pendingOrder) {
-            return MobileApiResponse::error('symbol_remove_warning_required', 'Removing a symbol is blocked while an open position or pending order is visible. Positions stay open if a symbol is removed.', [
+            return MobileApiResponse::error('symbol_remove_warning_required', 'Remove is blocked while an open position or pending order is visible.', [
                 'symbol' => $symbol,
                 'open_position' => (bool) $openPosition,
                 'pending_order' => (bool) $pendingOrder,
@@ -493,7 +537,7 @@ class MobileCustomerController extends Controller
         $entitlements = $this->entitlements($account);
 
         if (! $this->productEntitled($product, $entitlements)) {
-            return MobileApiResponse::error('product_entitlement_required', 'Automation requires an active product entitlement.', [], 403);
+            return MobileApiResponse::error('product_plan_required', 'Automation requires an active plan for this product.', [], 403);
         }
 
         $slot = $this->slotContext($request, $account, $accountSlot, $product);
@@ -501,11 +545,11 @@ class MobileCustomerController extends Controller
         $alpacaAccount = $slot['alpaca_account'];
 
         if (! $connection || ! $alpacaAccount || ! in_array(strtolower((string) $alpacaAccount->sync_status), ['success', 'partial_success'], true)) {
-            return MobileApiResponse::error('broker_not_connected', 'Connect and verify a broker account before toggling automation.', [], 409);
+            return MobileApiResponse::error('trading_account_not_ready', 'Connect and verify a trading account before turning automation on.', [], 409);
         }
 
         if ((bool) $request->boolean('enabled') && strtolower((string) $alpacaAccount->environment) === 'live' && ! $request->boolean('confirm_live')) {
-            return MobileApiResponse::error('live_account_warning_required', 'Live account automation requires explicit confirmation.', ['warning_required' => true], 409);
+            return MobileApiResponse::error('live_account_warning_required', 'Live automation requires confirmation.', ['warning_required' => true], 409);
         }
 
         $connection->forceFill([
@@ -558,16 +602,16 @@ class MobileCustomerController extends Controller
         }
 
         if (! $request->boolean('confirm')) {
-            return MobileApiResponse::error('manual_close_confirmation_required', 'Manual close requires explicit confirmation after reviewing the warning.', [
+            return MobileApiResponse::error('manual_close_confirmation_required', 'Closing a position requires confirmation.', [
                 'symbol' => strtoupper($symbol),
                 'warning_required' => true,
-                'warning' => 'Manual close is separate from automated strategy/runtime exits and may realize gains or losses.',
+                'warning' => 'Closing a position may realize gains or losses.',
             ], 409);
         }
 
         $this->audit($request, $account, 'mobile.position.manual_close.requested', $position, ['symbol' => strtoupper($symbol)]);
 
-        return MobileApiResponse::error('manual_close_service_unavailable', 'Manual close submission is not enabled for mobile v1. Use the existing guarded web action.', [
+        return MobileApiResponse::error('manual_close_service_unavailable', 'Closing positions from mobile is not available yet.', [
             'symbol' => strtoupper($symbol),
             'order_submitted' => false,
         ], 409);
@@ -755,7 +799,7 @@ class MobileCustomerController extends Controller
 
     public function billingPortal(): JsonResponse
     {
-        return MobileApiResponse::error('billing_portal_web_required', 'Billing portal creation is not enabled for mobile v1. Use the existing secure web billing path.', [], 409);
+        return MobileApiResponse::error('billing_portal_web_required', 'Billing changes are available from the secure web dashboard.', [], 409);
     }
 
     public function supportTickets(Request $request): JsonResponse
@@ -1035,10 +1079,10 @@ class MobileCustomerController extends Controller
         return [
             'product_code' => $product,
             'product_name' => $label,
-            'entitlement' => $entitled ? 'active' : 'inactive',
-            'trial_locked' => ! (bool) data_get($entitlements, 'subscription_active', false),
+            'status' => $entitled ? 'active' : 'inactive',
+            'status_label' => $entitled ? 'Active' : 'Needs activation',
             'automation_allowed' => $entitled,
-            'broker_required' => true,
+            'trading_account_requirement_label' => 'Trading account required',
             'accounts_count' => $account?->brokerConnections?->count() ?? 0,
         ];
     }

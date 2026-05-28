@@ -26,7 +26,7 @@ class MobileApiAuthenticate
         $plainTextToken = (string) $request->bearerToken();
 
         if ($plainTextToken === '') {
-            return MobileApiResponse::error('mobile_unauthenticated', 'Mobile authentication is required.', [], 401);
+            return MobileApiResponse::error('mobile_unauthenticated', 'Sign in to continue.', [], 401);
         }
 
         $token = MobileAccessToken::query()
@@ -39,11 +39,11 @@ class MobileApiAuthenticate
         }
 
         if (! $token->user->email_verified_at) {
-            return MobileApiResponse::error('email_unverified', 'Verify your email before using the mobile app.', [], 403);
+            return MobileApiResponse::error('email_unverified', 'Verify your email before using Bismel1.', [], 403);
         }
 
         if (! $token->user->hasCustomerAccess()) {
-            return MobileApiResponse::error('customer_access_required', 'Customer access is not available for this account.', [], 403);
+            return MobileApiResponse::error('customer_access_required', 'Account access is not available.', [], 403);
         }
 
         $token->forceFill([

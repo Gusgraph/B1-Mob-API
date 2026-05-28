@@ -32,21 +32,21 @@ class MobileAuthController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return MobileApiResponse::error('validation_failed', 'Check the login fields and try again.', $validator->errors()->toArray(), 422);
+            return MobileApiResponse::error('validation_failed', 'Check your login details and try again.', $validator->errors()->toArray(), 422);
         }
 
         $user = User::query()->where('email', $request->string('email')->lower()->value())->first();
 
         if (! $user || ! Hash::check((string) $request->input('password'), (string) $user->password)) {
-            return MobileApiResponse::error('invalid_credentials', 'The provided credentials are not valid.', [], 401);
+            return MobileApiResponse::error('invalid_credentials', 'The login details are not valid.', [], 401);
         }
 
         if (! $user->email_verified_at) {
-            return MobileApiResponse::error('email_unverified', 'Verify your email before using the mobile app.', [], 403);
+            return MobileApiResponse::error('email_unverified', 'Verify your email before using Bismel1.', [], 403);
         }
 
         if (! $user->hasCustomerAccess()) {
-            return MobileApiResponse::error('customer_access_required', 'Customer access is not available for this account.', [], 403);
+            return MobileApiResponse::error('customer_access_required', 'Account access is not available.', [], 403);
         }
 
         [$token, $plainTextToken] = MobileAccessToken::issue($user, $request->string('device_name')->trim()->value() ?: null);

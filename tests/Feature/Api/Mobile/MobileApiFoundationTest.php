@@ -73,7 +73,8 @@ class MobileApiFoundationTest extends TestCase
             'access_secret' => 'SECRETTRIAL',
         ], $this->bearerHeaders($user))
             ->assertStatus(403)
-            ->assertJsonPath('error.code', 'trial_locked');
+            ->assertJsonPath('error.code', 'plan_required')
+            ->assertJsonPath('error.message', 'Trading account setup is available after your plan is active.');
     }
 
     public function test_paid_user_can_list_dashboard_and_products(): void
@@ -84,11 +85,49 @@ class MobileApiFoundationTest extends TestCase
         $this->getJson('/api/mobile/v1/dashboard', $this->bearerHeaders($user))
             ->assertOk()
             ->assertJsonPath('ok', true)
-            ->assertJsonStructure(['data' => ['user', 'active_products', 'selected_account']]);
+            ->assertJsonStructure(['data' => ['user', 'active_products', 'selected_account', 'alerts', 'status_summary']])
+            ->assertJsonPath('data.alerts.0.title', 'Connect Trading Account')
+            ->assertJsonPath('data.alerts.0.message', 'Connect an eligible trading account before using live automation.');
 
         $this->getJson('/api/mobile/v1/products', $this->bearerHeaders($user))
             ->assertOk()
             ->assertJsonPath('data.products.0.product_code', 'prime_stocks');
+    }
+
+    public function test_mobile_dashboard_uses_customer_safe_alert_payload(): void
+    {
+        [$user] = $this->createAccessContext();
+
+        $response = $this->getJson('/api/mobile/v1/dashboard', $this->bearerHeaders($user))
+            ->assertOk()
+            ->assertJsonPath('data.alerts.0.title', 'Activate Your Plan')
+            ->assertJsonPath('data.status_summary.plan_status_label', 'Needs activation');
+
+        $content = $response->getContent();
+
+        $this->assertStringNotContainsString('Trial Locked', $content);
+        $this->assertStringNotContainsString('Admin Features Exposed', $content);
+        $this->assertStringNotContainsString('Broker Connected', $content);
+        $this->assertStringNotContainsString('trial_locked', $content);
+        $this->assertStringNotContainsString('broker_connected', $content);
+        $this->assertStringNotContainsString('admin_features_exposed', $content);
+    }
+
+    public function test_mobile_products_do_not_return_legacy_boolean_display_fields(): void
+    {
+        [$user, $account] = $this->createAccessContext();
+        $this->seedConfirmedBismel1Subscription($account, 'BISMILLAH1_BOT_PRIME');
+
+        $response = $this->getJson('/api/mobile/v1/products', $this->bearerHeaders($user))
+            ->assertOk()
+            ->assertJsonPath('data.products.0.status_label', 'Active')
+            ->assertJsonPath('data.products.0.trading_account_requirement_label', 'Trading account required');
+
+        $content = $response->getContent();
+
+        $this->assertStringNotContainsString('entitlement', $content);
+        $this->assertStringNotContainsString('trial_locked', $content);
+        $this->assertStringNotContainsString('broker_required', $content);
     }
 
     public function test_paid_user_can_add_symbol(): void
@@ -145,14 +184,14 @@ class MobileApiFoundationTest extends TestCase
 
         $this->postJson('/api/mobile/v1/automation/prime_stocks/1/toggle', ['enabled' => true], $this->bearerHeaders($trialUser))
             ->assertStatus(403)
-            ->assertJsonPath('error.code', 'product_entitlement_required');
+            ->assertJsonPath('error.code', 'product_plan_required');
 
         [$paidUser, $account] = $this->createAccessContext(['slug' => 'paid-'.Str::random(11)]);
         $this->seedConfirmedBismel1Subscription($account, 'BISMILLAH1_BOT_PRIME');
 
         $this->postJson('/api/mobile/v1/automation/prime_stocks/1/toggle', ['enabled' => true], $this->bearerHeaders($paidUser))
             ->assertStatus(409)
-            ->assertJsonPath('error.code', 'broker_not_connected');
+            ->assertJsonPath('error.code', 'trading_account_not_ready');
     }
 
     public function test_broker_connect_never_returns_secret(): void
